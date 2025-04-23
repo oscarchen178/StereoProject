@@ -1,5 +1,10 @@
 # Run on windows with single 4090
 
+## Create conda env
+```
+conda env create -f environment.yml
+```
+
 ### Enable Cupy PTX JIT
 ```
 $Env:CUPY_COMPILE_WITH_PTX = "1"
