@@ -399,7 +399,7 @@ def train(args):
             # validation & save ckpt
             if total_steps % validation_frequency == validation_frequency - 1:
                 if args.train_dataset == 'TartanAir':
-                    results = validate_tartanair(args, model.module if args.ddp else model, iters=args.valid_iters)
+                    results = validate_tartanair(args, model, iters=args.valid_iters)
                     logger.write_dict(results)
                     model.train()
                 else:
