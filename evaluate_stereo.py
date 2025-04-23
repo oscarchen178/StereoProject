@@ -226,127 +226,6 @@ def validate_tartanair(args, model, iters=32, mixed_prec=False):
     return {'TartanAir-epe': epe, 'TartanAir-d1': d1, 'TartanAir-d3': d3}
 
 
-@torch.no_grad()
-def validate_things(model, iters=32, mixed_prec=False):
-    """ Peform validation using the FlyingThings3D (TEST) split """
-    model.eval()
-    val_dataset = datasets.SceneFlowDatasets(dstype='frames_finalpass', things_test=True)
-
-    out_list, epe_list = [], []
-    for val_id in tqdm(range(len(val_dataset))):
-        _, image1, image2, flow_gt, valid_gt = val_dataset[val_id]
-        image1 = image1[None].cuda()
-        image2 = image2[None].cuda()
-
-        padder = InputPadder(image1.shape, divis_by=32)
-        image1, image2 = padder.pad(image1, image2)
-
-        with autocast(enabled=mixed_prec):
-            _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
-        flow_pr = padder.unpad(flow_pr).cpu().squeeze(0)
-        assert flow_pr.shape == flow_gt.shape, (flow_pr.shape, flow_gt.shape)
-        epe = torch.sum((flow_pr - flow_gt) ** 2, dim=0).sqrt()
-
-        epe = epe.flatten()
-        val = (valid_gt.flatten() >= 0.5) & (flow_gt.abs().flatten() < 192)
-
-        out = (epe > 1.0)
-        epe_list.append(epe[val].mean().item())
-        out_list.append(out[val].cpu().numpy())
-
-    epe_list = np.array(epe_list)
-    out_list = np.concatenate(out_list)
-
-    epe = np.mean(epe_list)
-    d1 = 100 * np.mean(out_list)
-
-    print("Validation FlyingThings: %f, %f" % (epe, d1))
-    return {'things-epe': epe, 'things-d1': d1}
-
-
-@torch.no_grad()
-def validate_temporal_things(args, model, iters=32, mixed_prec=False):
-    """ Peform validation using the FlyingThings3D (TEST) split """
-    model.eval()
-    val_dataset = datasets.SceneFlowDatasets(dstype='frames_cleanpass', things_test=True, mode='temporal')
-
-    def load(args, image1, image2, disp_gt, T):
-        # load image & disparity
-        image1 = read_gen(image1)
-        image2 = read_gen(image2)
-        image1 = np.array(image1)
-        image2 = np.array(image2)
-        disp_gt = read_gen(disp_gt)
-        disp_gt = torch.from_numpy(np.array(disp_gt).astype(np.float32))
-        image1 = torch.from_numpy(image1).permute(2, 0, 1).float()
-        image2 = torch.from_numpy(image2).permute(2, 0, 1).float()
-        T = torch.from_numpy(T).float()
-
-        T = T[None].cuda(args.device)
-        image1 = image1[None].cuda(args.device)
-        image2 = image2[None].cuda(args.device)
-        disp_gt = disp_gt[None].cuda(args.device)  # 1,1,h,w
-        return image1, image2, disp_gt, T
-
-    out_list, out3_list, epe_list = [], [], []
-    K = np.array([[1050., 0., 479.5],
-                  [0., 1050., 269.5],
-                  [0.0, 0.0, 1.0]])
-    K_raw = torch.from_numpy(K).float().cuda(args.device)[None]
-    baseline = torch.tensor(1.).float().cuda(args.device)[None]
-    for val_id in tqdm(range(len(val_dataset))):
-        image1_list, image2_list, flow_gt_list, pose_list = val_dataset[val_id]
-        params = dict()
-        flow_q = None
-        fmap1 = None
-        previous_T = None
-        net_list = None
-        for j, (image1, image2, disp_gt, T) in tqdm(enumerate(zip(image1_list, image2_list, flow_gt_list, pose_list))):
-            image1, image2, disp_gt, T = load(args, image1, image2, disp_gt, T)
-            padder = InputPadder(image1.shape, divis_by=32)
-            imgs, K = padder.pad(image1, image2, K=K_raw)
-            image1, image2 = imgs
-            params.update({'K': K,
-                           'T': T,
-                           'previous_T': previous_T,
-                           'last_disp': flow_q,
-                           'last_net_list': net_list,
-                           'fmap1': fmap1,
-                           'baseline': baseline})
-
-            with autocast(enabled=mixed_prec):
-                testing_output = model(image1, image2, iters=iters, test_mode=True, params=params if (flow_q is not None) and args.temporal else None)
-
-            disp_pr = -testing_output['flow']
-            flow_q = testing_output['flow_q']
-            net_list = testing_output['net_list']
-            fmap1 = testing_output['fmap1']
-            previous_T = T
-            disp_pr, K = padder.unpad(disp_pr, K=K)
-            val = (disp_gt.squeeze(0).abs().flatten() < 192)
-            if (val == False).all():
-                continue
-            epe = torch.sum((disp_pr.squeeze(0) - disp_gt.squeeze(0)) ** 2, dim=0).sqrt()
-
-            epe = epe.flatten()
-            out = (epe > 1.0).float()[val].mean().cpu().item()
-            out3 = (epe > 3.0).float()[val].mean().cpu().item()
-            mask_rate = val.float().mean().cpu().item()
-            epe_list.append(epe[val].mean().cpu().item())
-            out_list.append(np.array([out * mask_rate, mask_rate]))
-            out3_list.append(np.array([out3 * mask_rate, mask_rate]))
-
-    epe_list = np.array(epe_list)
-    out_list = np.stack(out_list, axis=0)
-    out3_list = np.stack(out3_list, axis=0)
-
-    epe = np.mean(epe_list)
-    d1 = 100 * np.mean(out_list[:, 0]) / np.mean(out_list[:, 1])
-    d3 = 100 * np.mean(out3_list[:, 0]) / np.mean(out3_list[:, 1])
-    print("Validation FlyingThings: EPE %f, D1 %f, D3 %f" % (epe, d1, d3))
-
-    return {'things-epe': epe, 'things-d1': d1, 'things-d3': d3}
-
 
 if __name__ == '__main__':
     import os
@@ -406,9 +285,6 @@ if __name__ == '__main__':
 
     if args.dataset == 'kitti':
         submit_kitti(args, model, iters=args.valid_iters, mixed_prec=use_mixed_precision)
-
-    elif args.dataset == 'things':
-        validate_temporal_things(args, model, iters=args.valid_iters, mixed_prec=use_mixed_precision)
 
     elif args.dataset == 'TartanAir':
         validate_tartanair(args, model, iters=args.valid_iters, mixed_prec=use_mixed_precision)

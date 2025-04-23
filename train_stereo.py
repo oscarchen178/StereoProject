@@ -12,7 +12,7 @@ import torch.optim as optim
 from core.tc_stereo import TCStereo
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from evaluate_stereo import count_parameters, validate_tartanair, validate_temporal_things
+from evaluate_stereo import count_parameters, validate_tartanair
 from core.utils.geo_utils import disp2disp_gradient_xy,disp2disp_normal_xy
 from core.utils.utils import MedianPool2d
 import core.stereo_datasets as datasets
@@ -271,35 +271,15 @@ def save_ckpt(args, model, optimizer, scheduler, total_steps):
 
 def train(args):
     torch.use_deterministic_algorithms(True,warn_only=True)
-    # ddp mode
-    if args.ddp:
-        rank = int(os.environ["RANK"])
-        local_rank = int(os.environ["LOCAL_RANK"])
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-        dist.init_process_group(backend="nccl")
-        args.device = local_rank
-        print(f"[init] == local rank: {local_rank}, global rank: {rank} ==")
-        model = TCStereo(args)
-        if args.sync_bn:
-            model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).cuda(args.device)
-        else:
-            model = model.cuda(args.device)
-        if args.restore_ckpt is not None:
-            logging.info("Loading checkpoint...")
-            checkpoint = torch.load(args.restore_ckpt, map_location=torch.device('cpu'))
-            model.load_state_dict(checkpoint['model'], strict=True)
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
-        setup_seed(1234 + torch.distributed.get_rank())
-    # single gpu mode
-    else:
-        setup_seed(1234)
-        model = TCStereo(args)
-        if args.restore_ckpt is not None:
-            assert args.restore_ckpt.endswith(".pth")
-            logging.info("Loading checkpoint...")
-            checkpoint = torch.load(args.restore_ckpt)
-            model.load_state_dict(checkpoint['model'], strict=True)
-            logging.info(f"Done loading checkpoint")
+
+    setup_seed(1234)
+    model = TCStereo(args)
+    if args.restore_ckpt is not None:
+        assert args.restore_ckpt.endswith(".pth")
+        logging.info("Loading checkpoint...")
+        checkpoint = torch.load(args.restore_ckpt)
+        model.load_state_dict(checkpoint['model'], strict=True)
+        logging.info(f"Done loading checkpoint")
 
     print("Parameter Count: %d" % count_parameters(model))
 
@@ -329,8 +309,7 @@ def train(args):
     # training loop
     while should_keep_training:
         epoch += 1
-        if args.ddp:
-            train_loader.sampler.set_epoch(epoch)
+
         for i_batch, (_, *data_blob) in tqdm(enumerate(train_loader)):
             # temporal training
             if args.temporal:
@@ -419,14 +398,8 @@ def train(args):
                 logger.writer.log({"live_loss": loss / args.frame_length, 'learning_rate': optimizer.param_groups[0]['lr']})
             # validation & save ckpt
             if total_steps % validation_frequency == validation_frequency - 1:
-                if local_rank == 0:
-                    save_ckpt(args, model, optimizer, scheduler, total_steps)
                 if args.train_dataset == 'TartanAir':
                     results = validate_tartanair(args, model.module if args.ddp else model, iters=args.valid_iters)
-                    logger.write_dict(results)
-                    model.train()
-                elif args.train_dataset == 'sceneflow':
-                    results = validate_temporal_things(args,model.module if args.ddp else model, iters=args.valid_iters)
                     logger.write_dict(results)
                     model.train()
                 else:
@@ -438,14 +411,13 @@ def train(args):
                 should_keep_training = False
                 break
 
-        if len(train_loader) >= 10000 and local_rank == 0:
+        if len(train_loader) >= 10000:
             save_ckpt(args, model, optimizer, scheduler, total_steps)
 
     print("FINISHED TRAINING")
     # logger.close()
-    if local_rank == 0:
-        PATH = 'checkpoints/new_%s.pth' % args.name
-        torch.save({'model': model.module.state_dict()}, PATH)
+    PATH = 'checkpoints/new_%s.pth' % args.name
+    torch.save({'model': model.module.state_dict()}, PATH)
 
     return PATH
 
