@@ -112,13 +112,13 @@ class StereoDataset(data.Dataset):
                 img1 = frame_utils.read_gen(img1_path)
                 img2 = frame_utils.read_gen(img2_path)
 
-                img1 = torch.from_numpy(np.array(img1).astype(np.uint8)).permute(2, 0, 1).cuda(self.device)
-                img2 = torch.from_numpy(np.array(img2).astype(np.uint8)).permute(2, 0, 1).cuda(self.device)
+                img1 = torch.from_numpy(np.array(img1).astype(np.uint8)).permute(2, 0, 1)
+                img2 = torch.from_numpy(np.array(img2).astype(np.uint8)).permute(2, 0, 1)
 
                 disp = np.array(disp).astype(np.float32)
                 flow = np.stack([-disp, np.zeros_like(disp)], axis=-1)  # h,w,2
-                flow = torch.from_numpy(flow).permute(2, 0, 1).float().cuda(self.device)  # 2,h,w
-                valid = torch.from_numpy(valid)[None].float().cuda(self.device)
+                flow = torch.from_numpy(flow).permute(2, 0, 1).float()  # 2,h,w
+                valid = torch.from_numpy(valid)[None].float()
 
                 # for grayscale images
                 if len(img1.shape) == 2:
@@ -140,18 +140,18 @@ class StereoDataset(data.Dataset):
                     K = self.intrinsic_K[index]
                 else:
                     K = self.intrinsic_K
-                left_seq, right_seq, flow_seq, valid_seq, K = self.augmentor(left_seq, right_seq, flow_seq, valid_seq, torch.from_numpy(K.copy()).cuda(self.device))
+                left_seq, right_seq, flow_seq, valid_seq, K = self.augmentor(left_seq, right_seq, flow_seq, valid_seq, torch.from_numpy(K.copy()))
             else:
                 if self.intrinsic_K is not None and isinstance(self.intrinsic_K, list):
                     K = self.intrinsic_K[index]
                 else:
                     K = self.intrinsic_K
-                left_seq, right_seq, flow_seq, K = self.augmentor(left_seq, right_seq, flow_seq, torch.from_numpy(K.copy()).cuda(self.device))
+                left_seq, right_seq, flow_seq, K = self.augmentor(left_seq, right_seq, flow_seq, torch.from_numpy(K.copy()))
 
             flow_seq = flow_seq[:, :1].float()
             K = K.float()
-            T_seq = torch.from_numpy(T_seq).float().cuda(self.device)
-            baseline = torch.tensor(self.baseline).float().cuda(self.device)  # 1
+            T_seq = torch.from_numpy(T_seq).float()
+            baseline = torch.tensor(self.baseline).float()  # 1
 
             if self.sparse:
                 valid_seq = valid_seq.squeeze(1)  # n,h,w
@@ -462,12 +462,8 @@ def fetch_dataloader(args):
         raise NotImplementedError(f"Dataset {dataset_name} not implemented")
     train_dataset = new_dataset
 
-
-    # train_loader = data.DataLoader(train_dataset, batch_size=args.batch_size,
-    #                                pin_memory=False, num_workers=int(os.environ.get('SLURM_CPUS_PER_TASK', 6)) - 2, prefetch_factor=4, drop_last=True,
-    #                                shuffle=True)
     train_loader = data.DataLoader(train_dataset, batch_size=4,
-                                    pin_memory=False, num_workers=0, prefetch_factor=None, drop_last=True,
+                                    pin_memory=False, num_workers=4, prefetch_factor=4, drop_last=True,
                                     shuffle=True)
 
     logging.info('Training with %d image pairs' % len(train_dataset))

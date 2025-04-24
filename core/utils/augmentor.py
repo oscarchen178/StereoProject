@@ -403,7 +403,7 @@ class TemporalFlowAugmentor:
         scale_y = np.clip(scale_y, min_scale, None)
 
         if np.random.rand() < self.spatial_aug_prob:
-            K = K * (torch.tensor([scale_x, scale_y, 1]).reshape((3, 1))).cuda(K.device)
+            K = K * (torch.tensor([scale_x, scale_y, 1]).reshape((3, 1)))
             # rescale the images
             seq1 = torch.stack(seq1, dim=0)
             seq2 = torch.stack(seq2, dim=0)
@@ -412,7 +412,7 @@ class TemporalFlowAugmentor:
             seq1 = F.interpolate(seq1, scale_factor=(scale_y, scale_x), mode='bilinear')
             seq2 = F.interpolate(seq2, scale_factor=(scale_y, scale_x), mode='bilinear')
             flow_seq = F.interpolate(flow_seq, scale_factor=(scale_y, scale_x), mode='bilinear')
-            flow_seq = flow_seq * torch.tensor([scale_x, scale_y]).view(1, 2, 1, 1).cuda(K.device)
+            flow_seq = flow_seq * torch.tensor([scale_x, scale_y]).view(1, 2, 1, 1)
 
         if self.yjitter:
             y0 = np.random.randint(2, seq1.shape[2] - self.crop_size[0] - 2)
@@ -650,7 +650,7 @@ class TemporalSparseFlowAugmentor:
         scale_y = np.clip(scale_y, min_scale, None)
 
         if np.random.rand() < self.spatial_aug_prob:
-            K = K * (torch.tensor([scale_x, scale_y, 1]).reshape((3, 1))).cuda(K.device)
+            K = K * (torch.tensor([scale_x, scale_y, 1]).reshape((3, 1)))
             # rescale the images
             seq1 = torch.stack(seq1, dim=0)
             seq2 = torch.stack(seq2, dim=0)
@@ -662,7 +662,7 @@ class TemporalSparseFlowAugmentor:
             # Note: we use semi-dense pseudo disparity map from LEAStereo, so we don't need to use sparse resize for flow and valid
             # If you use sparse flow, please rewrite resize_sparse_flow_map_torch with K and use it here
             flow_seq = F.interpolate(flow_seq, scale_factor=(scale_y, scale_x), mode='bilinear')
-            flow_seq = flow_seq * torch.tensor([scale_x, scale_y]).view(1, 2, 1, 1).cuda(K.device)
+            flow_seq = flow_seq * torch.tensor([scale_x, scale_y]).view(1, 2, 1, 1)
             valid_seq = (F.interpolate(valid_seq.float(), scale_factor=(scale_y, scale_x), mode='bilinear')==1).float()
         else:
             seq1 = torch.stack(seq1, dim=0)
@@ -809,12 +809,12 @@ class TemporalSparseFlowAugmentor:
         return seq1, seq2, flow_seq, valid_seq, K  # n,h,w,c
 
 
-if __name__ == '__main__':
-    AG=TemporalFlowAugmentor([480, 640])
-    seq1 = [torch.from_numpy(np.zeros((3, 480, 640),dtype=np.uint8)).cuda() for _ in range(2)]
-    seq2 = [torch.from_numpy(np.zeros((3, 480, 640),dtype=np.uint8)).cuda() for _ in range(2)]
-    flow_seq = [torch.from_numpy(np.zeros((2, 480, 640))).cuda() for _ in range(2)]
-    K =torch.from_numpy(np.array([[320.0, 0, 320.0],
-                 [0, 320.0, 240.0],
-                 [0, 0, 1]])).cuda()
-    a=AG(seq1,seq2,flow_seq,K)
+# if __name__ == '__main__':
+#     AG=TemporalFlowAugmentor([480, 640])
+#     seq1 = [torch.from_numpy(np.zeros((3, 480, 640),dtype=np.uint8)).cuda() for _ in range(2)]
+#     seq2 = [torch.from_numpy(np.zeros((3, 480, 640),dtype=np.uint8)).cuda() for _ in range(2)]
+#     flow_seq = [torch.from_numpy(np.zeros((2, 480, 640))).cuda() for _ in range(2)]
+#     K =torch.from_numpy(np.array([[320.0, 0, 320.0],
+#                  [0, 320.0, 240.0],
+#                  [0, 0, 1]])).cuda()
+#     a=AG(seq1,seq2,flow_seq,K)

@@ -45,7 +45,7 @@ def submit_kitti(args, model, iters=32, mixed_prec=False):
     fmap1 = None
     previous_T = None
     net_list = None
-    baseline = torch.tensor(0.54).float().cuda(args.device)[None]
+    baseline = torch.tensor(0.54).float().cuda()[None]
     out_list, epe_list, elapsed_list = [], [], []
 
     def load(args, image1, image2, T):
@@ -57,9 +57,9 @@ def submit_kitti(args, model, iters=32, mixed_prec=False):
         image1 = torch.from_numpy(image1).permute(2, 0, 1).float()
         image2 = torch.from_numpy(image2).permute(2, 0, 1).float()
         T = torch.from_numpy(T).float()
-        T = T[None].cuda(args.device)
-        image1 = image1[None].cuda(args.device)
-        image2 = image2[None].cuda(args.device)
+        T = T[None].cuda()
+        image1 = image1[None].cuda()
+        image2 = image2[None].cuda()
         return image1, image2, T
 
     for val_id in tqdm(range(len(val_dataset))):
@@ -69,7 +69,7 @@ def submit_kitti(args, model, iters=32, mixed_prec=False):
         K = np.array([[Pr2[0], 0, Pr2[2]],
                       [0, Pr2[5], Pr2[6]],
                       [0, 0, 1]])
-        K_raw = torch.from_numpy(K).float().cuda(args.device)[None]
+        K_raw = torch.from_numpy(K).float().cuda()[None]
         for frame_ind, (image1, image2, T) in tqdm(enumerate(zip(image1_list, image2_list, pose_list))):
             image1, image2, T = load(args, image1, image2, T)
             padder = InputPadder(image1.shape, divis_by=32)
@@ -141,8 +141,8 @@ def validate_tartanair(args, model, iters=32, mixed_prec=False):
     K = np.array([[320.0, 0, 320.0],
                   [0, 320.0, 240.0],
                   [0, 0, 1]])
-    K_raw = torch.from_numpy(K).float().cuda(args.device)[None]
-    baseline = torch.tensor(0.25).float().cuda(args.device)[None]
+    K_raw = torch.from_numpy(K).float().cuda()[None]
+    baseline = torch.tensor(0.25).float().cuda()[None]
 
     # Evaluate Metrics list
     out_list, out3_list, epe_list = [], [], []
@@ -160,10 +160,10 @@ def validate_tartanair(args, model, iters=32, mixed_prec=False):
         image2 = torch.from_numpy(image2).permute(2, 0, 1).float()
         T = torch.from_numpy(T).float()
 
-        T = T[None].cuda(args.device)
-        image1 = image1[None].cuda(args.device)
-        image2 = image2[None].cuda(args.device)
-        disp_gt = disp_gt[None].cuda(args.device)  # 1,1,h,w
+        T = T[None].cuda()
+        image1 = image1[None].cuda()
+        image2 = image2[None].cuda()
+        disp_gt = disp_gt[None].cuda()  # 1,1,h,w
         return image1, image2, disp_gt, T
 
     # Testing
@@ -276,7 +276,7 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s')
 
-    model.cuda(args.device)
+    model.cuda()
     model.eval()
 
     print(f"The model has {format(count_parameters(model) / 1e6, '.2f')}M learnable parameters.")

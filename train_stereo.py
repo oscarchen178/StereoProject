@@ -289,7 +289,7 @@ def train(args):
     total_steps = 0
     logger = Logger(model, scheduler, 100, frame_length=args.frame_length)
 
-    model.cuda(args.device)
+    model.cuda()
     model.train()
 
     # # we set norm layer to none instead of freezing bn
@@ -319,13 +319,17 @@ def train(args):
                 loss = 0
                 flow_q, previous_T, fmap1, net_list = None, None, None, None
                 params = dict()
-                baseline = data_blob[-1].cuda(args.device)
-                K = data_blob[-2].cuda(args.device)
+                baseline = data_blob[-1].cuda()
+                K = data_blob[-2].cuda()
                 data_blob = data_blob[:-2]
+
+                if flow_q is not None:
+                    flow_q, previous_T, fmap1, net_list = flow_q.cuda(), previous_T.cuda(), fmap1.cuda(), net_list.cuda()
 
                 model.zero_grad()
                 for i_seq in range(args.frame_length):
-                    image1, image2, flow, valid, T = [x[:, i_seq] for x in data_blob]
+                    image1, image2, flow, valid, T = [x[:, i_seq].cuda() for x in data_blob]
+
                     params.update({'K': K,  # n,3,3
                                    'T': T,  # n,4,4
                                    'previous_T': previous_T,
@@ -337,7 +341,6 @@ def train(args):
 
                     assert model.training
                     training_output = model(image1, image2, iters=args.train_iters, params=params if flow_q is not None else None, frame_id=i_seq)
-                    assert model.training
 
                     # losses
                     loss_gamma = 0.9
@@ -393,9 +396,10 @@ def train(args):
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 scaler.step(optimizer)
-                scheduler.step()
                 scaler.update()
+                scheduler.step()
                 logger.writer.log({"live_loss": loss / args.frame_length, 'learning_rate': optimizer.param_groups[0]['lr']})
+           
             # validation & save ckpt
             if total_steps % validation_frequency == validation_frequency - 1:
                 if args.train_dataset == 'TartanAir':
