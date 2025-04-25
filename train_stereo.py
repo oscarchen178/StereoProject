@@ -316,6 +316,7 @@ def train(args):
     # training loop
     while should_keep_training:
         epoch += 1
+        print(f"Epoch {epoch} of {args.num_steps}")
 
         length = len(train_loader)
         for i_batch, (_, *data_blob) in tqdm(enumerate(train_loader), total=length):
@@ -496,6 +497,11 @@ if __name__ == '__main__':
     
     # Use TC+DEFOM model
     parser.add_argument('--use_defom', action='store_true', help='build NewStereo (TC-Stereo integrated with DEFOM) instead of the original TC-Stereo')
+    parser.add_argument('--scale_iters', type=int, default=8)
+    parser.add_argument('--scale_list', type=float, nargs='+', default=[0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
+    parser.add_argument('--scale_corr_radius', type=int, default=2)
+    parser.add_argument('--defom_variant', type=str, default='vits', choices=['vits', 'vitl'], help='DINOv2 variant')
+    
     args = parser.parse_args()
 
     torch.manual_seed(1234)

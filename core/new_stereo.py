@@ -18,7 +18,7 @@ from core.extractor import (
     ResidualBlock,
     DefomEncoder,  # DEFOM DepthAnyThing‑based encoder
 )
-from core.corr import NewCorrBlock1D
+from core.corr import NewCorrBlock1D, CorrBlock1D
 from core.utils.utils import coords_grid, upflow8, bilinear_sampler
 from core.utils.geo_utils import (
     cal_relative_transformation,
@@ -59,10 +59,10 @@ class NewStereo(nn.Module):
         self.args = args
 
         ### Args from DEFOM
-        self.scale_iters = 8
-        self.scale_list = [0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
-        self.scale_corr_radius = 2
-        self.defom_variant = 'vits'
+        self.scale_iters = args.scale_iters
+        self.scale_list = args.scale_list
+        self.scale_corr_radius = args.scale_corr_radius
+        self.defom_variant = args.defom_variant
         ###
 
         self.scale_rate = 1 / (2 ** args.n_downsample)
@@ -166,19 +166,43 @@ class NewStereo(nn.Module):
             ih, iw = image1.shape[-2:]
             danv2_io_sizes = (ih, iw, ih, iw)
             _, da_f1, da_f2, idepth = self.defomencoder([image1, image2], danv2_io_sizes)
+
+            # Align resolution to CNN feature maps if needed
+            if da_f1.shape[-2:] != fmap1.shape[-2:]:
+                da_f1 = F.interpolate(da_f1, size=fmap1.shape[-2:], mode="bilinear", align_corners=True)
+                da_f2 = F.interpolate(da_f2, size=fmap2.shape[-2:], mode="bilinear", align_corners=True)
+            
             # Align channels and add
             fmap1 = fmap1 + self.defom_f_align(da_f1)
             fmap2 = fmap2 + self.defom_f_align(da_f2)
 
-        # Correlation volume
+        # Correlation volume – requires reference coordinate grid
+        coords_init = coords_grid(
+            fmap1.shape[0], fmap1.shape[2], fmap1.shape[3]
+        ).to(fmap1.device)[:, :1]  # keep only x-coordinate channel
+
         corr_fn = NewCorrBlock1D(
             fmap1.float(),
             fmap2.float(),
-            radius=self.args.corr_radius,
+            coords_init,
             num_levels=self.args.corr_levels,
+            radius=self.args.corr_radius,
             scale_list=self.scale_list,
             scale_corr_radius=self.scale_corr_radius,
         )
+
+        # Compute a 4-D cost volume compatible with the original loss (B, W2, H, W1)
+        with torch.no_grad():
+            # Raw cost volume (B, H, W1, 1, W2)
+            corr_raw = CorrBlock1D.corr(fmap1.float(), fmap2.float())
+            cost_volume_full = corr_raw.squeeze(3).permute(0, 3, 1, 2).contiguous()  # (B, W2, H, W1)
+
+            # Match TC-Stereo semantics: zero out entries that would correspond to negative disparity
+            B, W2, Hc, W1 = cost_volume_full.shape
+            w1_index = torch.arange(W1, device=cost_volume_full.device).view(1, 1, 1, W1)
+            w2_index = torch.arange(W2, device=cost_volume_full.device).view(1, W2, 1, 1)
+            mask = (w1_index >= w2_index).float()  # keep only non-negative disparity (w1 >= w2)
+            cost_volume_full = cost_volume_full * mask
 
         # --- disparity / hidden‑state initialisation (same as original) --- #
         if params is not None:  # temporal case
@@ -198,15 +222,27 @@ class NewStereo(nn.Module):
             cost = (F.normalize(fmap1, dim=1) * F.normalize(warped_fmap1, dim=1)).sum(dim=1, keepdim=True)
             cost = cost * sparse_mask
         else:
-            sparse_disp, cost, sparse_mask = corr_fn.argmax_disp()
             last_net_list = None
 
-            # DEFOM depth‑based init (optionally override sparse_disp)
-            eta = 0.5  # as in DEFOM‑Stereo paper
-            ih, iw = sparse_disp.shape[-2:]
+            # DEFOM depth-based initial disparity (no correlation argmax used)
+            eta = 0.5  # as in DEFOM-Stereo paper
+            ih, iw = image1.shape[-2:]  # original image resolution
             max_d = idepth.view(idepth.size(0), -1).max(dim=1)[0].view(-1, 1, 1, 1) + 1e-8
-            idepth_norm = idepth / max_d * eta * iw + 0.01
-            sparse_disp = idepth_norm.detach()
+            idepth_norm = idepth / max_d * eta * iw + 0.01  # convert inverse depth to disparity scale
+
+            sparse_disp = idepth_norm.detach()                     # [N,1,H,W]
+            cost = torch.zeros_like(sparse_disp)                    # dummy cost volume
+            sparse_mask = torch.ones_like(sparse_disp)              # full mask (all valid)
+
+        # Ensure disparity / cost / mask match the spatial size of context features
+        # Context feature resolution (same as net_list later) taken from cnet output
+        h_ctx, w_ctx = cnet_list[0][0].shape[-2:]
+        if sparse_disp.shape[-2:] != (h_ctx, w_ctx):
+            sparse_disp_ds = F.interpolate(sparse_disp, size=(h_ctx, w_ctx), mode="bilinear", align_corners=True)
+            cost_ds = F.interpolate(cost.detach(), size=(h_ctx, w_ctx), mode="bilinear", align_corners=True)
+            mask_ds = F.interpolate(sparse_mask, size=(h_ctx, w_ctx), mode="nearest")
+        else:
+            sparse_disp_ds, cost_ds, mask_ds = sparse_disp, cost.detach(), sparse_mask
 
         # disparity completion & network inputs
         with autocast(enabled=self.args.mixed_precision):
@@ -214,7 +250,7 @@ class NewStereo(nn.Module):
             grad_list = [conv(i) for i, conv in zip(inp_list, self.context_zqr_convs_grad)]
             inp_list = [list(conv(i).split(conv.out_channels // 3, dim=1)) for i, conv in zip(inp_list, self.context_zqr_convs)]
             net_list = [x[0] for x in cnet_list]
-            disp_init, disp_mono, w_mono, net_list = self.disp_completor(sparse_disp, cost.detach(), sparse_mask, net_list)
+            disp_init, disp_mono, w_mono, net_list = self.disp_completor(sparse_disp_ds, cost_ds.detach(), mask_ds, net_list)
 
         # warping previous hidden state
         if last_net_list is None:
@@ -227,8 +263,10 @@ class NewStereo(nn.Module):
                 backward_grid = 0.5 * F.interpolate(backward_grid, scale_factor=0.5, mode='bilinear', align_corners=True)
 
         # fuse hidden state
-        net_list = [torch.tanh(x) for x in net_list]
-        net_list = [fuse(n, w) for fuse, n, w in zip(self.previous_current_hidden_fuse, net_list, warped_net_list)]
+        # Ensure running under mixed-precision
+        with autocast(enabled=self.args.mixed_precision):
+            net_list = [torch.tanh(x) for x in net_list]
+            net_list = [fuse(n, w) for fuse, n, w in zip(self.previous_current_hidden_fuse, net_list, warped_net_list)]
 
         # flow init
         coords0, coords1 = self.initialize_flow(fmap1)
@@ -304,7 +342,7 @@ class NewStereo(nn.Module):
             'flow_predictions': flow_predictions,
             'flow_q_predictions': flow_q_predictions,
             'disp_grad_q_predictions': disp_grad_q_predictions,
-            'cost_volume': cost.detach(),
+            'cost_volume': cost_volume_full.detach(),
             # temporal info for next frame
             'flow_q': torch.clip(flow_q_final.detach(), max=0),
             'net_list': net_list,

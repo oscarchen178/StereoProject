@@ -331,9 +331,17 @@ class DefomEncoder(nn.Module):
     def forward(self, x, danv2_io_sizes):
 
         x = torch.cat(x, dim=0)
-        ih, iw, oh, ow = danv2_io_sizes
-        x = F.interpolate(x, (ih, iw), mode="bilinear", align_corners=True)
+        # ih, iw, oh, ow = danv2_io_sizes
+        # Adjust input spatial size so that it is divisible by the patch size (14)
+        ih_in, iw_in, oh, ow = danv2_io_sizes
+        # Round the height and width up to the nearest multiple of 14.
+        # This guarantees compatibility with the ViT patch embedding layer used in DINOv2.
+        patch_sz = getattr(self.depth_anything.pretrained, 'patch_size', 14)
+        ih = ((ih_in + patch_sz - 1) // patch_sz) * patch_sz
+        iw = ((iw_in + patch_sz - 1) // patch_sz) * patch_sz
 
+        x = F.interpolate(x, (ih, iw), mode="bilinear", align_corners=True)
+        
         features, left_feat, right_feat, idepth = self.depth_anything(x, oh, ow)
 
         bs = idepth.shape[0]

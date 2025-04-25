@@ -417,7 +417,7 @@ class ScaleBasicMultiUpdateBlock(nn.Module):
         self.args = args
         encoder_output_dim = 128
         cor_planes = len(args.scale_list) * (2*args.scale_corr_radius + 1)
-        self.encoder = BasicMotionEncoder(cor_planes, out_planes=encoder_output_dim)
+        self.encoder = BasicMotionEncoderDisp(cor_planes, out_planes=encoder_output_dim)
 
         self.gru08 = ConvGRU(hidden_dims[2], encoder_output_dim + hidden_dims[1] * (args.n_gru_layers > 1))
         self.gru16 = ConvGRU(hidden_dims[1], hidden_dims[0] * (args.n_gru_layers == 3) + hidden_dims[2])
@@ -456,3 +456,31 @@ class ScaleBasicMultiUpdateBlock(nn.Module):
         # scale mask to balence gradients
         mask = .25 * self.mask(net[0])
         return net, mask, scale_disp
+
+
+class BasicMotionEncoderDisp(nn.Module):
+    """Motion encoder used by DEFOM scale update block (takes disp instead of flow)."""
+
+    def __init__(self, cor_planes, c1_planes=64, c2_planes=64, f1_planes=64, f2_planes=64, out_planes=128):
+        super().__init__()
+        # correlation branch
+        self.convc1 = nn.Conv2d(cor_planes, c1_planes, 1, padding=0)
+        self.convc2 = nn.Conv2d(c1_planes, c2_planes, 3, padding=1)
+        # disparity branch
+        self.convd1 = nn.Conv2d(1, f1_planes, 7, padding=3)
+        self.convd2 = nn.Conv2d(f1_planes, f2_planes, 3, padding=1)
+        # fusion branch (leave one channel for residual disp that is concatenated later)
+        self.conv = nn.Conv2d(c2_planes + f2_planes, out_planes - 1, 3, padding=1)
+
+    def forward(self, disp, corr):
+        # correlation features
+        cor = F.relu(self.convc1(corr))
+        cor = F.relu(self.convc2(cor))
+        # disparity features
+        dis = F.relu(self.convd1(disp))
+        dis = F.relu(self.convd2(dis))
+        # fuse
+        cor_dis = torch.cat([cor, dis], dim=1)
+        out = F.relu(self.conv(cor_dis))
+        # append raw disp as last channel so output dimension == out_planes
+        return torch.cat([out, disp], dim=1)

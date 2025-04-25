@@ -462,7 +462,7 @@ def fetch_dataloader(args):
     train_dataset = new_dataset
 
     train_loader = data.DataLoader(train_dataset, batch_size=4,
-                                    pin_memory=False, num_workers=4, prefetch_factor=4, drop_last=True,
+                                    pin_memory=False, num_workers=2, prefetch_factor=2, drop_last=True,
                                     shuffle=True)
 
     logging.info('Training with %d image pairs' % len(train_dataset))

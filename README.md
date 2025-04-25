@@ -9,6 +9,7 @@ This version is adapted to be runnable on a windows PC and a single 4090.
 ## Dependencies install
 ```
 conda env create -f environment.yml
+conda activate StereoProject
 ```
 
 ## Dataset Structure
