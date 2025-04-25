@@ -443,9 +443,8 @@ def fetch_dataloader(args):
         logging.info(f"Adding {len(new_dataset)} samples from KITTI")
     elif dataset_name == 'TartanAir':
         keyword_list = []
-        scene_list = ['abandonedfactory', 'amusement', 'carwelding', 'endofworld', 'gascola', 'hospital', 'office', 'office2',
-                      'oldtown', 'soulcity']
-        part_list = ['P002', 'P007', 'P003', 'P006', 'P001', 'P042', 'P006', 'P004', 'P006', 'P008']
+        scene_list = ['abandonedfactory', 'abandonedfactory_night']
+        part_list = ['P000', 'P001', 'P002', 'P003', 'P004', 'P005', 'P006', 'P007']
 
         for i, (s, p) in enumerate(zip(scene_list, part_list)):
             keyword_list.append(os.path.join(s, 'Easy', p))  # temporal stereo off

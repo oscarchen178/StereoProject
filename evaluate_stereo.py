@@ -124,9 +124,8 @@ def validate_tartanair(args, model, iters=32, mixed_prec=False):
     aug_params = {}
     # test set
     keyword_list = []
-    scene_list = ['abandonedfactory', 'amusement', 'carwelding', 'endofworld', 'gascola', 'hospital', 'office', 'office2',
-                  'oldtown', 'soulcity']  # ablation study
-    part_list = ['P002', 'P007', 'P003', 'P006', 'P001', 'P042', 'P006', 'P004', 'P006', 'P008']
+    scene_list = ['abandonedfactory', 'abandonedfactory_night']
+    part_list = ['P008', 'P009', 'P010', 'P011', 'P012', 'P013', 'P014']
 
     # TODO: modify test datasets
 
@@ -167,7 +166,7 @@ def validate_tartanair(args, model, iters=32, mixed_prec=False):
         return image1, image2, disp_gt, T
 
     # Testing
-    for val_id in tqdm(range(len(val_dataset))):
+    for val_id in range(len(val_dataset)):
         image1_list, image2_list, flow_gt_list, pose_list = val_dataset[val_id]
         # temporal parameters
         params = dict()
@@ -176,7 +175,8 @@ def validate_tartanair(args, model, iters=32, mixed_prec=False):
         previous_T = None
         net_list = None
 
-        for j, (image1, image2, disp_gt, T) in tqdm(enumerate(zip(image1_list, image2_list, flow_gt_list, pose_list))):
+        length = len(image1_list)
+        for j, (image1, image2, disp_gt, T) in tqdm(enumerate(zip(image1_list, image2_list, flow_gt_list, pose_list)), total=length):
             # load
             image1, image2, disp_gt, T = load(args, image1, image2, disp_gt, T)
             padder = InputPadder(image1.shape, divis_by=32)

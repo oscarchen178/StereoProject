@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+from depth_anything_v2.dpt import DepthAnythingV2
+import os
+import torch.nn.functional as F
 
 
 class ResidualBlock(nn.Module):
@@ -294,3 +297,48 @@ class MultiBasicEncoder(nn.Module):
         outputs32 = [f(z) for f in self.outputs32]
 
         return (outputs08, outputs16, outputs32, v) if dual_inp else (outputs08, outputs16, outputs32)
+
+
+### From DEFOM Stereo
+class DefomEncoder(nn.Module):
+    def __init__(self, dinov2_encoder, pretrained=True, freeze=True, idepth_scale=0.25):
+        super(DefomEncoder, self).__init__()
+        self.dinov2_encoder = dinov2_encoder
+        self.idepth_scale = idepth_scale
+        self.pretrained = pretrained
+        self.freeze = freeze
+
+        model_configs = {
+            'vits': {'encoder': 'vits', 'features': 64, 'out_channels': [48, 96, 192, 384]},
+            'vitb': {'encoder': 'vitb', 'features': 128, 'out_channels': [96, 192, 384, 768]},
+            'vitl': {'encoder': 'vitl', 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
+            'vitg': {'encoder': 'vitg', 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
+        }
+
+        self.depth_anything = DepthAnythingV2(**model_configs[self.dinov2_encoder])
+
+        if pretrained and os.path.exists(f'./checkpoints/depth_anything_v2_{dinov2_encoder}.pth'):
+            self.depth_anything.load_state_dict(
+                torch.load(f'./checkpoints/depth_anything_v2_{dinov2_encoder}.pth', map_location='cpu'), strict=False)
+        if freeze:
+            for param in self.depth_anything.pretrained.parameters():
+                param.requires_grad = False
+            for param in self.depth_anything.depth_head.parameters():
+                param.requires_grad = False
+        
+        self.out_dim = model_configs[self.dinov2_encoder]['features']
+
+    def forward(self, x, danv2_io_sizes):
+
+        x = torch.cat(x, dim=0)
+        ih, iw, oh, ow = danv2_io_sizes
+        x = F.interpolate(x, (ih, iw), mode="bilinear", align_corners=True)
+
+        features, left_feat, right_feat, idepth = self.depth_anything(x, oh, ow)
+
+        bs = idepth.shape[0]
+        max_idepth, _ = torch.max(idepth.view(bs, -1), dim=1)
+        max_idepth = max_idepth.detach().view(bs, 1, 1, 1) + 1e-8
+        idepth = idepth / max_idepth * self.idepth_scale * ow + 0.01
+
+        return features, left_feat, right_feat, idepth

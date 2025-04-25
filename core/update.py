@@ -397,3 +397,62 @@ class DisparityCompletor(nn.Module):
         disp_net_list = [self.conv_out4_disp(x4_out), self.conv_out8_disp(x8_out), self.conv_out16_disp(x16_out)]
 
         return disp_completed, disp_mono, w, disp_net_list
+
+
+### From DEFOM stereo
+class DispHead(nn.Module):
+    def __init__(self, input_dim=128, hidden_dim=256, output_dim=1):
+        super(DispHead, self).__init__()
+        self.conv1 = nn.Conv2d(input_dim, hidden_dim, 3, padding=1)
+        self.conv2 = nn.Conv2d(hidden_dim, output_dim, 3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        return self.conv2(self.relu(self.conv1(x)))
+    
+    
+class ScaleBasicMultiUpdateBlock(nn.Module):
+    def __init__(self, args, hidden_dims=[128, 128, 128]):
+        super().__init__()
+        self.args = args
+        encoder_output_dim = 128
+        cor_planes = len(args.scale_list) * (2*args.scale_corr_radius + 1)
+        self.encoder = BasicMotionEncoder(cor_planes, out_planes=encoder_output_dim)
+
+        self.gru08 = ConvGRU(hidden_dims[2], encoder_output_dim + hidden_dims[1] * (args.n_gru_layers > 1))
+        self.gru16 = ConvGRU(hidden_dims[1], hidden_dims[0] * (args.n_gru_layers == 3) + hidden_dims[2])
+        self.gru32 = ConvGRU(hidden_dims[0], hidden_dims[1])
+        self.disp_head = DispHead(hidden_dims[2], hidden_dim=256, output_dim=1)
+
+        factor = 2**self.args.n_downsample
+
+        self.mask = nn.Sequential(
+            nn.Conv2d(hidden_dims[2], 256, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, (factor**2)*9, 1, padding=0))
+
+    def forward(self, net, inp, corr=None, disp=None, iter08=True, iter16=True, iter32=True, update=True):
+
+        if iter32:
+            net[2] = self.gru32(net[2], *(inp[2]), pool2x(net[1]))
+        if iter16:
+            if self.args.n_gru_layers > 2:
+                net[1] = self.gru16(net[1], *(inp[1]), pool2x(net[0]), interp(net[2], net[1]))
+            else:
+                net[1] = self.gru16(net[1], *(inp[1]), pool2x(net[0]))
+        if iter08:
+            motion_features = self.encoder(disp, corr)
+            if self.args.n_gru_layers > 1:
+                net[0] = self.gru08(net[0], *(inp[0]), motion_features, interp(net[1], net[0]))
+            else:
+                net[0] = self.gru08(net[0], *(inp[0]), motion_features)
+
+        if not update:
+            return net
+
+        x_disp = self.disp_head(net[0])
+        scale_disp = F.relu6(torch.exp(.25*x_disp))
+
+        # scale mask to balence gradients
+        mask = .25 * self.mask(net[0])
+        return net, mask, scale_disp

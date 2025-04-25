@@ -14,7 +14,7 @@ $Env:CUPY_COMPILE_WITH_PTX = "1"
 $Env:CUBLAS_WORKSPACE_CONFIG = ":4096:8"
 ```
 
-## For training
+## For training on original TCstereo
 
 ### On TartanAir
 ```
@@ -30,19 +30,18 @@ python train_stereo.py `
 --shared_backbone `
 --saturation_range 0.0 1.4 `
 --spatial_scale -0.2 0.4 `
---name ablation_tartanair `
+--name tartanair `
 --temporal `
 --init_thres 0.5 `
 --frame_length 4 `
 --noyjitter `
 --context_norm none `
---device 0
 ```
 
 ### On KITTIraw
 ```
 python train_stereo.py `
---pth_name new_kitti_raw `
+--pth_name kitti_raw `
 --mixed_precision `
 --batch_size 4 `
 --train_dataset kitti_raw `
@@ -54,14 +53,19 @@ python train_stereo.py `
 --shared_backbone `
 --saturation_range 0.7 1.3 `
 --spatial_scale -0.2 0.2  `
---name KITTI_RAW `
+--name kitti_raw `
 --temporal `
 --init_thres 0.5 `
 --frame_length 4 `
 --noyjitter `
 --restore_ckpt ./checkpoints/tartanair.pth `
 --context_norm none `
---device 0
+```
+
+## For training on the new model
+add this arg
+```
+--use_defom
 ```
 
 ## For evaluate

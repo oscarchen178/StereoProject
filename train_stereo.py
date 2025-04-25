@@ -10,6 +10,7 @@ import torch
 import random
 import torch.optim as optim
 from core.tc_stereo import TCStereo
+from core.new_stereo import NewStereo
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from evaluate_stereo import count_parameters, validate_tartanair
@@ -262,7 +263,7 @@ def save_ckpt(args, model, optimizer, scheduler, total_steps):
     logging.info(f"Saving file {save_path.absolute()}")
     state = {
         'total_steps': total_steps,
-        'model': model.module.state_dict(),
+        'model': model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'scheduler': scheduler.state_dict()
     }
@@ -273,7 +274,13 @@ def train(args):
     torch.use_deterministic_algorithms(True,warn_only=True)
 
     setup_seed(1234)
-    model = TCStereo(args)
+
+    ###  Choose model
+    if args.use_defom:
+        model = NewStereo(args)
+    else:
+        model = TCStereo(args)
+
     if args.restore_ckpt is not None:
         assert args.restore_ckpt.endswith(".pth")
         logging.info("Loading checkpoint...")
@@ -298,7 +305,7 @@ def train(args):
     # else:
     #     model.freeze_bn()
 
-    validation_frequency = 10000
+    validation_frequency = 10
 
     scaler = GradScaler(enabled=args.mixed_precision)
 
@@ -310,7 +317,8 @@ def train(args):
     while should_keep_training:
         epoch += 1
 
-        for i_batch, (_, *data_blob) in tqdm(enumerate(train_loader)):
+        length = len(train_loader)
+        for i_batch, (_, *data_blob) in tqdm(enumerate(train_loader), total=length):
             # temporal training
             if args.temporal:
                 # assert args.frame_length > 1
@@ -415,13 +423,26 @@ def train(args):
                 should_keep_training = False
                 break
 
-        if len(train_loader) >= 10000:
-            save_ckpt(args, model, optimizer, scheduler, total_steps)
+
+        # save_ckpt(args, model, optimizer, scheduler, total_steps)
 
     print("FINISHED TRAINING")
     # logger.close()
-    PATH = 'checkpoints/new_%s.pth' % args.name
-    torch.save({'model': model.module.state_dict()}, PATH)
+    if args.use_defom:
+        # using the new model
+        prefix = 'new'
+    else:
+        # prefix 'small' because the training dataset I use 
+        # is much smaller than the TC-Stereo paper
+        prefix = 'small'
+    PATH = 'checkpoints/%s_%s.pth' % (prefix, args.name)
+    state = {
+        'total_steps': total_steps,
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'scheduler': scheduler.state_dict()
+    }
+    torch.save(state, PATH)
 
     return PATH
 
@@ -438,7 +459,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=6, help="batch size used during training.")
     parser.add_argument('--train_dataset', default='sceneflow', choices=['TartanAir', 'sceneflow', "kitti_raw"], help="training dataset.")
     parser.add_argument('--lr', type=float, default=0.0002, help="max learning rate.")
-    parser.add_argument('--num_steps', type=int, default=100000, help="length of training schedule.")
+    parser.add_argument('--num_steps', type=int, default=100, help="length of training schedule.")
     parser.add_argument('--image_size', type=int, nargs='+', default=[320, 720], help="size of the random image crops used during training.")
     parser.add_argument('--train_iters', type=int, default=5, help="number of updates to the disparity field in each training forward pass.")
     parser.add_argument('--wdecay', type=float, default=.00001, help="Weight decay in optimizer.")
@@ -472,6 +493,9 @@ if __name__ == '__main__':
     parser.add_argument('--do_flip', default=False, choices=['h', 'v'], help='flip the images horizontally or vertically')
     parser.add_argument('--spatial_scale', type=float, nargs='+', default=[0, 0], help='re-scale the images randomly')
     parser.add_argument('--noyjitter', action='store_true', help='don\'t simulate imperfect rectification')
+    
+    # Use TC+DEFOM model
+    parser.add_argument('--use_defom', action='store_true', help='build NewStereo (TC-Stereo integrated with DEFOM) instead of the original TC-Stereo')
     args = parser.parse_args()
 
     torch.manual_seed(1234)
