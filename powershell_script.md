@@ -62,7 +62,7 @@ python train_stereo.py `
 --context_norm none `
 ```
 
-## For training on the new model
+### For the new model
 add this arg
 ```
 --use_defom
@@ -79,6 +79,19 @@ python .\evaluate_stereo.py `
   --shared_backbone `
   --temporal `
   --context_norm none `
-  --restore_ckpt .\checkpoints\tartanair.pth `
-  --device 0
+  --restore_ckpt .\checkpoints\small_tartanair.pth `
 ```
+
+### TartanAir new model
+```
+python .\evaluate_stereo.py `
+  --dataset TartanAir `
+  --mixed_precision `
+  --valid_iters 5 `
+  --shared_backbone `
+  --temporal `
+  --context_norm none `
+  --restore_ckpt .\checkpoints\new_tartanair.pth `
+  --use_defom
+```
+

@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from core.tc_stereo import TCStereo, autocast
+from core.new_stereo import NewStereo
 import core.stereo_datasets as datasets
 from core.utils.utils import InputPadder
 from core.utils.frame_utils import readDispTartanAir, read_gen
@@ -126,8 +127,6 @@ def validate_tartanair(args, model, iters=32, mixed_prec=False):
     keyword_list = []
     scene_list = ['abandonedfactory', 'abandonedfactory_night']
     part_list = ['P008', 'P009', 'P010', 'P011', 'P012', 'P013', 'P014']
-
-    # TODO: modify test datasets
 
     for i, (s, p) in enumerate(zip(scene_list, part_list)):
         keyword_list.append(os.path.join(s, 'Easy', p))
@@ -254,6 +253,13 @@ if __name__ == '__main__':
     parser.add_argument('--n_gru_layers', type=int, default=3, help="number of hidden GRU levels")
     parser.add_argument('--temporal', action='store_true', help="temporal mode")  # TODO: MODEL temporal mode
 
+    # Use TC+DEFOM model
+    parser.add_argument('--use_defom', action='store_true', help='build NewStereo (TC-Stereo integrated with DEFOM) instead of the original TC-Stereo')
+    parser.add_argument('--scale_iters', type=int, default=8)
+    parser.add_argument('--scale_list', type=float, nargs='+', default=[0.125, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0])
+    parser.add_argument('--scale_corr_radius', type=int, default=2)
+    parser.add_argument('--defom_variant', type=str, default='vits', choices=['vits', 'vitl'], help='DINOv2 variant')
+    
     args = parser.parse_args()
 
     # if args.visualize:
@@ -264,14 +270,19 @@ if __name__ == '__main__':
     )
     # add the args to wandb
     wandb.config.update(args)
-    model = TCStereo(args)
+
+    ###  Choose model
+    if args.use_defom:
+        model = NewStereo(args)
+    else:
+        model = TCStereo(args)
+
     if args.restore_ckpt is not None:
         assert args.restore_ckpt.endswith(".pth")
         logging.info("Loading checkpoint...")
         checkpoint = torch.load(args.restore_ckpt)
         model.load_state_dict(checkpoint['model'], strict=True)
         logging.info(f"Done loading checkpoint")
-    model = torch.nn.DataParallel(model, device_ids=[args.device])
 
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s')
