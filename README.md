@@ -1,8 +1,11 @@
 # StereoProject
 
 ## Acknowledgement
-The code is mostly based on Temporally-Consistent-Stereo-Matching.
+The code is mostly based on Temporally-Consistent-Stereo-Matching
 https://github.com/jiaxiZeng/Temporally-Consistent-Stereo-Matching
+and DEFOM-Stereo https://github.com/Insta360-Research-Team/DEFOM-Stereo.
+
+The new model is created based on TCstereo and integrated DEFOMstereo.
 
 This version is adapted to be runnable on a windows PC and a single 4090.
 
@@ -13,6 +16,7 @@ conda activate StereoProject
 ```
 
 ## Dataset Structure
+Datasets should be installed in the following structure.
 ```
 datasets
 ├── TartanAir
